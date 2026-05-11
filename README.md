@@ -1,184 +1,179 @@
-# Telegram Channel Video Downloader
+# Telegram Media Downloader
 
-A production-ready, asynchronous Telegram channel video downloader built with Python and [Telethon](https://github.com/LonamiWebs/Telethon). Features resumable downloads, concurrency control, disk space monitoring, retry logic with exponential backoff, integrity verification, duplicate skipping, and Telegram bot notifications.
-
----
+A comprehensive **video/photo downloader for all your Telegram chats** built with [Telethon](https://codeberg.org/Lonami/Telethon). Supports channels, groups, and private chats with duplicate detection, resume support, and configurable filters.
 
 ## Features
 
-| Feature | Description |
-|---------|-------------|
-| **Async Downloads** | Non-blocking I/O with `asyncio` for maximum throughput |
-| **Concurrency Control** | Semaphore-limited simultaneous downloads (default: 15) |
-| **Resumable Downloads** | Interrupted downloads resume from the last byte offset |
-| **Exponential Backoff** | Retry delay doubles after each failure: 5s -> 10s -> 20s -> 40s |
-| **Disk Space Guard** | Aborts if free space drops below threshold (default: 10 GB) |
-| **Integrity Verification** | Validates file size matches expected value before finalizing |
-| **Duplicate Skipping** | Tracks downloaded IDs; skips already-downloaded files on restart |
-| **Telegram Notifications** | Sends progress, completion, and error alerts via your bot |
-| **File Reference Refresh** | Auto-refreshes expired Telegram file references |
-| **Graceful Shutdown** | Ctrl+C triggers clean disconnect; waits for active downloads |
+- **All Chats**: Scans and downloads from every chat you're in — channels, groups, and private conversations
+- **Smart Filtering**: Filter by media type, date range, file size, chat type
+- **Duplicate Detection**: Tracks downloaded media by unique ID so nothing is downloaded twice
+- **Resume Support**: Persistent state file — stop and resume anytime without losing progress
+- **Rate Limiting**: Built-in delays and flood-wait handling to keep your account safe
+- **Organized Output**: Files saved in folders named by chat (`downloads/ChatName_ID/`)
+- **Progress Tracking**: Real-time console display showing chats processed, files downloaded, and transfer speed
+- **Concurrent Downloads**: Configurable parallel downloads for faster completion
 
----
+## Quick Start
 
-## Prerequisites
+### 1. Get API Credentials
 
-- **Python 3.7+**
-- **Telegram API Credentials**: `api_id` and `api_hash` from [my.telegram.org/apps](https://my.telegram.org/apps)
-- **Telegram Bot** (optional): For progress notifications via [@BotFather](https://t.me/BotFather)
+You need an `api_id` and `api_hash` from Telegram:
 
----
+1. Go to [https://my.telegram.org](https://my.telegram.org)
+2. Log in with your phone number
+3. Click **API development tools**
+4. Create a new app (any name works)
+5. Copy the **api_id** (numbers) and **api_hash** (letters/numbers)
 
-## Installation
-
-### 1. Clone the repository
+### 2. Install Dependencies
 
 ```bash
-git clone https://github.com/YOUR_USERNAME/telegram-channel-video-downloader.git
-cd telegram-channel-video-downloader
+pip install telethon
 ```
 
-### 2. Install dependencies
+Or manually:
+```bash
+pip install telethon
+```
+
+### 3. Run the Downloader
 
 ```bash
-pip install -r requirements.txt
+python telegram_downloader.py \
+    --api-id 12345 \
+    --api-hash abcdef0123456789abcdef0123456789 \
+    --download-dir ./my_downloads
 ```
 
-### 3. Configure environment variables
+On first run, you'll receive a login code via Telegram. Enter it when prompted.
 
+## Usage Examples
+
+### Download only photos from 2024
 ```bash
-cp .env.example .env
+python telegram_downloader.py \
+    --api-id 12345 --api-hash abcdef... \
+    --media-types photo \
+    --date-from 2024-01-01
 ```
 
-Edit `.env` and fill in your credentials:
-
-```env
-TELEGRAM_API_ID=12345678
-TELEGRAM_API_HASH=your_api_hash_here
-TELEGRAM_CHANNEL=@your_channel_username
-
-# Optional: for Telegram bot notifications
-TELEGRAM_BOT_API_KEY=your_bot_token_here
-TELEGRAM_CHAT_ID=your_chat_id_here
-```
-
-### Getting Your Credentials
-
-**API ID & Hash:**
-1. Visit [my.telegram.org/apps](https://my.telegram.org/apps)
-2. Log in with your Telegram account
-3. Fill out the application form (any name/description works)
-4. Copy the **API ID** and **API Hash**
-
-**Bot Token & Chat ID (for notifications):**
-1. Message [@BotFather](https://t.me/BotFather) on Telegram
-2. Create a new bot with `/newbot`
-3. Copy the bot token
-4. Message [@userinfobot](https://t.me/userinfobot) to get your Chat ID
-
----
-
-## Usage
-
-### Basic Run (uses `.env` defaults)
-
+### Download only from groups, skip channels and private chats
 ```bash
-python telegram_downloader.py
+python telegram_downloader.py \
+    --api-id 12345 --api-hash abcdef... \
+    --no-private --no-channels
 ```
 
-### Command Line Options
-
-| Flag | Description | Default |
-|------|-------------|---------|
-| `--channel` | Channel username or ID | From `.env` |
-| `--output` | Output folder | `videos_output` |
-| `--min-size` | Minimum video size in MB | `100` |
-| `--concurrent` | Max simultaneous downloads | `15` |
-| `--retries` | Max retry attempts | `5` |
-| `--retry-delay` | Initial retry delay (seconds) | `5` |
-| `--max-retry-delay` | Max retry delay (seconds) | `40` |
-| `--session` | Telethon session name | `anon` |
-| `--disk-threshold` | Min free space in GB | `10` |
-
-### Examples
-
+### Download only videos under 500MB, skip specific chats
 ```bash
-# Download only very large videos (500MB+)
-python telegram_downloader.py --min-size 500
-
-# Reduce concurrency for slower connections
-python telegram_downloader.py --concurrent 5
-
-# Specific channel with custom output folder
-python telegram_downloader.py --channel @mychannel --output ./backups/videos
-
-# Higher disk threshold for safety
-python telegram_downloader.py --disk-threshold 50
+python telegram_downloader.py \
+    --api-id 12345 --api-hash abcdef... \
+    --media-types video \
+    --max-size 500 \
+    --exclude-chats spam_channel_1 -1001234567890
 ```
 
----
+### Resume an interrupted download
+```bash
+# Just run the same command again — progress is saved automatically
+python telegram_downloader.py --api-id 12345 --api-hash abcdef...
+```
+
+### Start fresh (ignore previous state)
+```bash
+python telegram_downloader.py --api-id 12345 --api-hash abcdef... --reset
+```
+
+### Organize by date subfolders
+```bash
+python telegram_downloader.py \
+    --api-id 12345 --api-hash abcdef... \
+    --organize-by-date
+```
+
+## Command Reference
+
+| Option | Default | Description |
+|--------|---------|-------------|
+| `--api-id` | *(required)* | Telegram API ID |
+| `--api-hash` | *(required)* | Telegram API hash |
+| `--session` | `telegram_media_downloader` | Session file name |
+| `--phone` | *(prompts)* | Phone number with country code |
+| `--download-dir` | `./downloads` | Output folder |
+| `--media-types` | `photo video` | Space-separated: `photo`, `video`, `audio`, `document`, `voice`, `sticker` |
+| `--max-size` | `2048` | Max file size in MB |
+| `--min-size` | `0` | Min file size in KB |
+| `--date-from` | — | Start date (YYYY-MM-DD) |
+| `--date-to` | — | End date (YYYY-MM-DD) |
+| `--no-private` | — | Skip 1-on-1 chats |
+| `--no-groups` | — | Skip groups |
+| `--no-channels` | — | Skip channels |
+| `--exclude-chats` | — | Space-separated chat IDs/usernames to skip |
+| `--rate-limit` | `1.5` | Seconds between API calls |
+| `--concurrent` | `2` | Simultaneous downloads |
+| `--skip-forwards` | — | Skip forwarded messages |
+| `--organize-by-date` | — | Create `YYYY-MM` subfolders |
+| `--no-dedup` | — | Disable duplicate detection |
+| `--state-file` | `download_state.json` | Resume state file |
+| `--reset` | — | Clear state and restart |
 
 ## File Structure
 
+After downloading, your files are organized like this:
+
 ```
-telegram-channel-video-downloader/
-|-- telegram_downloader.py    # Main script
-|-- requirements.txt          # Python dependencies
-|-- .env                      # Credentials (gitignored)
-|-- .env.example              # Template for sharing
-|-- .gitignore                # Git ignore rules
-|-- README.md                 # This file
-|-- videos_output/            # Downloaded videos (auto-created)
-|   |-- 2024-01-15_10-30-00_12345.mp4
-|   |-- 2024-01-15_11-45-00_12346.mp4
-|   |-- downloaded_videos.txt # ID tracking log
-|-- logs/                     # Log files (auto-created)
-|   |-- telegram_downloader_20240115_103045.log
+downloads/
+├── My_Channel_1_-1001234567890/
+│   ├── photo_123.jpg
+│   ├── video_456.mp4
+│   └── document_789.pdf
+├── Private_Chat_987654321/
+│   └── photo_100.jpg
+└── Group_Chat_111111111/
+    ├── video_200.mp4
+    └── video_201.mp4
 ```
 
----
+With `--organize-by-date`:
+```
+downloads/
+├── My_Channel_1_-1001234567890/
+│   ├── 2024-01/
+│   │   └── photo_123.jpg
+│   └── 2024-03/
+│       └── video_456.mp4
+```
 
 ## How It Works
 
-1. **Authentication** - Creates a `.session` file after first login (reused automatically)
-2. **Scanning** - Iterates channel messages filtered by `InputMessagesFilterVideo`
-3. **Filtering** - Skips already-downloaded IDs and files below size threshold
-4. **Downloading** - Writes to `.temp` file, verifies size, then renames to final
-5. **Resuming** - Checks existing `.temp` file size and uses `offset` parameter
-6. **Retrying** - On timeout, waits with exponential backoff up to max retries
-7. **Notifying** - Sends batch updates every 10 downloads and final summary
+1. **Connects** to Telegram using your API credentials
+2. **Scans** all dialogs (chats, groups, channels) you have access to
+3. **Iterates** messages newest-first, filtering for media you configured
+4. **Downloads** each media file with progress tracking
+5. **Saves** state after every 10 files and after each chat — safe to interrupt anytime
 
----
+## Safety Notes
 
-## Key Behaviors
-
-- **Interrupting**: Press `Ctrl+C` - the script catches `KeyboardInterrupt`, sends a stop notification, and disconnects cleanly after finishing active downloads
-- **Resuming**: Restart the script - it skips completed files and resumes partial `.temp` files
-- **Errors**: Failed downloads after max retries are logged and notified; the script continues with the remaining queue
-- **Disk Space**: If space drops below the threshold, downloads pause and a warning is sent
-
----
-
-## Security Notes
-
-- **Never commit `.env`** - it is already in `.gitignore`
-- **Protect `.session` files** - they contain your Telegram authentication (already in `.gitignore`)
-- **Use a dedicated API app** - don't share API credentials across projects
-
----
+- **Telegram ToS**: Don't abuse this. Aggressive scraping can get your account limited. The default `--rate-limit 1.5` is conservative.
+- **Flood waits**: If Telegram asks you to wait, the script handles it automatically.
+- **Storage**: Large channels can have terabytes of media. Check available disk space and use `--max-size` / `--date-from` filters.
 
 ## Troubleshooting
 
-| Issue | Solution |
-|-------|----------|
-| `FileReferenceExpiredError` | Script auto-refreshes; if persistent, restart the script |
-| `TimedOutError` repeatedly | Lower `--concurrent` or increase `--retry-delay` |
-| Disk full warnings | Increase `--disk-threshold` or free up space |
-| Channel not found | Use full ID format `-1001234567890` or exact `@username` |
-| No notifications | Verify `TELEGRAM_BOT_API_KEY` and `TELEGRAM_CHAT_ID` |
+### "No media found in chat"
+- Check that `--media-types` includes the type you're looking for
+- Use `--date-from` to verify messages exist in that date range
 
----
+### "FloodWaitError"
+- This is normal. The script sleeps automatically and resumes.
+- Increase `--rate-limit` if it happens frequently.
+
+### Session expires / "Invalid password"
+- Delete the `.session` file and run again to re-authenticate.
+
+### Want to skip already-processed chats
+- Edit `download_state.json` and set the chat offset to `-1` for chats you want to skip.
 
 ## License
 
-MIT License - feel free to use, modify, and distribute.
+This project is unlicensed — use it however you want. Respect Telegram's Terms of Service and the privacy of chat participants.
