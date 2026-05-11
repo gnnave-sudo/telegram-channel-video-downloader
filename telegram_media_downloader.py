@@ -80,7 +80,7 @@ def build_parser() -> argparse.ArgumentParser:
             "Examples:\n"
             "  %(prog)s --api-id 12345 --api-hash abcdef...\n"
             "  %(prog)s --api-id 12345 --api-hash abcdef... --chat @mychannel\n"
-            "  %(prog)s --api-id 12345 --api-hash abcdef... --chat -1001234567890 --media-types video\n"
+            "  %(prog)s --api-id 12345 --api-hash abcdef... --chat -1001234567890 --forward-to @backupgroup\n"
             "  %(prog)s --api-id 12345 --api-hash abcdef... --chat @group1 @group2 --media-types photo\n"
             "  %(prog)s --api-id 12345 --api-hash abcdef... --media-types photo --date-from 2024-01-01\n"
             "  %(prog)s --api-id 12345 --api-hash abcdef... --reset --concurrent 4\n"
@@ -196,6 +196,15 @@ def build_parser() -> argparse.ArgumentParser:
         "--no-dedup",
         action="store_true",
         help="Disable duplicate detection by media file ID",
+    )
+    parser.add_argument(
+        "--forward-to",
+        type=str,
+        default=None,
+        help=(
+            "Forward downloaded media to another chat after downloading. "
+            "Examples: --forward-to @mybackupgroup  --forward-to -1009876543210"
+        ),
     )
     parser.add_argument(
         "--state-file",
@@ -549,6 +558,19 @@ async def download_media_file(
             state.total_downloaded += 1
             if dedup and media_id:
                 state.downloaded_ids.add(media_id)
+
+            # Forward to target chat if specified
+            forward_target = getattr(args, "_forward_entity", None)
+            if forward_target:
+                try:
+                    await client.forward_messages(
+                        forward_target,
+                        messages=message.id,
+                        from_peer=message.chat_id,
+                    )
+                except Exception as fwd_exc:
+                    print(f"\n[Forward] Failed to forward msg {message.id}: {fwd_exc}")
+
             return True
         else:
             progress.files_failed += 1
@@ -830,6 +852,7 @@ async def main() -> None:
     print(f"[Config] No channels: {args.no_channels}")
     print(f"[Config] Target chat(s): {args.chat or 'All chats'}")
     print(f"[Config] Exclude chats: {args.exclude_chats or '—'}")
+    print(f"[Config] Forward to: {args.forward_to or '—'}")
     print()
 
     # Connect and authenticate
@@ -837,6 +860,17 @@ async def main() -> None:
     try:
         await client.start(phone=lambda: args.phone or input("Phone number: "))
         print(f"[Auth] Logged in as {(await client.get_me()).first_name}\n")
+
+        # Resolve forward target if specified
+        if args.forward_to:
+            try:
+                forward_entity = await client.get_entity(args.forward_to)
+                args._forward_entity = forward_entity
+                print(f"[Forward] Target resolved: {getattr(forward_entity, 'title', args.forward_to)}\n")
+            except Exception as exc:
+                print(f"[Warning] Could not resolve forward target '{args.forward_to}': {exc}")
+                print("[Warning] Forwarding disabled. Downloads will still proceed.\n")
+                args._forward_entity = None
 
         await scan_dialogs(client, state, progress, args, semaphore)
 
