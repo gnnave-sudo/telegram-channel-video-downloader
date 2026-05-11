@@ -81,6 +81,7 @@ def build_parser() -> argparse.ArgumentParser:
             "  %(prog)s --api-id 12345 --api-hash abcdef...\n"
             "  %(prog)s --api-id 12345 --api-hash abcdef... --chat @mychannel\n"
             "  %(prog)s --api-id 12345 --api-hash abcdef... --chat -1001234567890 --forward-to @backupgroup\n"
+            "  %(prog)s --api-id 12345 --api-hash abcdef... --chat @channel --bot-token BOT_TOKEN --send-to @backupchannel\n"
             "  %(prog)s --api-id 12345 --api-hash abcdef... --chat @group1 @group2 --media-types photo\n"
             "  %(prog)s --api-id 12345 --api-hash abcdef... --media-types photo --date-from 2024-01-01\n"
             "  %(prog)s --api-id 12345 --api-hash abcdef... --reset --concurrent 4\n"
@@ -204,6 +205,25 @@ def build_parser() -> argparse.ArgumentParser:
         help=(
             "Forward downloaded media to another chat after downloading. "
             "Examples: --forward-to @mybackupgroup  --forward-to -1009876543210"
+        ),
+    )
+    parser.add_argument(
+        "--bot-token",
+        type=str,
+        default=None,
+        help=(
+            "Bot token for uploading downloaded media to a backup channel. "
+            "Get from @BotFather. Requires --send-to."
+        ),
+    )
+    parser.add_argument(
+        "--send-to",
+        type=str,
+        default=None,
+        help=(
+            "Channel/group ID or username where the bot will UPLOAD downloaded files. "
+            "The bot must be an admin in this channel. "
+            "Examples: --send-to @backupchannel  --send-to -1009876543210"
         ),
     )
     parser.add_argument(
@@ -571,6 +591,21 @@ async def download_media_file(
                 except Exception as fwd_exc:
                     print(f"\n[Forward] Failed to forward msg {message.id}: {fwd_exc}")
 
+            # Upload via bot to backup channel if specified
+            bot = getattr(args, "_bot_client", None)
+            send_target = getattr(args, "_send_entity", None)
+            if bot and send_target and downloaded_path:
+                try:
+                    caption = f"From: {getattr(message.chat, 'title', 'Unknown')}\nOriginal: t.me/c/{message.chat_id}/{message.id}"
+                    await bot.send_file(
+                        send_target,
+                        downloaded_path,
+                        caption=caption[:1024],
+                        force_document=False,
+                    )
+                except Exception as bot_exc:
+                    print(f"\n[Bot] Failed to upload msg {message.id}: {bot_exc}")
+
             return True
         else:
             progress.files_failed += 1
@@ -853,13 +888,21 @@ async def main() -> None:
     print(f"[Config] Target chat(s): {args.chat or 'All chats'}")
     print(f"[Config] Exclude chats: {args.exclude_chats or '—'}")
     print(f"[Config] Forward to: {args.forward_to or '—'}")
+    print(f"[Config] Bot send to: {args.send_to or '—'}")
     print()
 
-    # Connect and authenticate
+    # Validate bot args
+    if bool(args.bot_token) != bool(args.send_to):
+        print("[Error] --bot-token and --send-to must be used together.")
+        sys.exit(1)
+
+    # Connect and authenticate (user client for downloading)
     client = TelegramClient(args.session, args.api_id, args.api_hash)
+    bot_client = None
     try:
         await client.start(phone=lambda: args.phone or input("Phone number: "))
-        print(f"[Auth] Logged in as {(await client.get_me()).first_name}\n")
+        me = await client.get_me()
+        print(f"[Auth] User logged in as {me.first_name} (id={me.id})\n")
 
         # Resolve forward target if specified
         if args.forward_to:
@@ -871,6 +914,24 @@ async def main() -> None:
                 print(f"[Warning] Could not resolve forward target '{args.forward_to}': {exc}")
                 print("[Warning] Forwarding disabled. Downloads will still proceed.\n")
                 args._forward_entity = None
+
+        # Initialize bot client for uploads if configured
+        if args.bot_token and args.send_to:
+            bot_session = f"{args.session}_bot"
+            bot_client = TelegramClient(bot_session, args.api_id, args.api_hash)
+            await bot_client.start(bot_token=args.bot_token)
+            bot_me = await bot_client.get_me()
+            print(f"[Bot] Bot connected: @{bot_me.username} (id={bot_me.id})")
+            try:
+                send_entity = await bot_client.get_entity(args.send_to)
+                args._send_entity = send_entity
+                args._bot_client = bot_client
+                print(f"[Bot] Send target resolved: {getattr(send_entity, 'title', args.send_to)}\n")
+            except Exception as exc:
+                print(f"[Warning] Bot cannot access send target '{args.send_to}': {exc}")
+                print("[Warning] Bot uploads disabled. Make sure the bot is an admin in the channel.\n")
+                args._send_entity = None
+                args._bot_client = None
 
         await scan_dialogs(client, state, progress, args, semaphore)
 
@@ -890,6 +951,8 @@ async def main() -> None:
         sys.exit(130)
     finally:
         await client.disconnect()
+        if bot_client:
+            await bot_client.disconnect()
 
 
 if __name__ == "__main__":
