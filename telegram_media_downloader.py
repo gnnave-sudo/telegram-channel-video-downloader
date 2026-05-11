@@ -79,8 +79,10 @@ def build_parser() -> argparse.ArgumentParser:
         epilog=(
             "Examples:\n"
             "  %(prog)s --api-id 12345 --api-hash abcdef...\n"
-            "  %(prog)s --api-id 12345 --api-hash abcdef... --media-types photo\n"
-            "  %(prog)s --api-id 12345 --api-hash abcdef... --date-from 2024-01-01\n"
+            "  %(prog)s --api-id 12345 --api-hash abcdef... --chat @mychannel\n"
+            "  %(prog)s --api-id 12345 --api-hash abcdef... --chat -1001234567890 --media-types video\n"
+            "  %(prog)s --api-id 12345 --api-hash abcdef... --chat @group1 @group2 --media-types photo\n"
+            "  %(prog)s --api-id 12345 --api-hash abcdef... --media-types photo --date-from 2024-01-01\n"
             "  %(prog)s --api-id 12345 --api-hash abcdef... --reset --concurrent 4\n"
         ),
     )
@@ -150,6 +152,16 @@ def build_parser() -> argparse.ArgumentParser:
         "--no-channels",
         action="store_true",
         help="Skip channels",
+    )
+    parser.add_argument(
+        "--chat",
+        type=str,
+        nargs="*",
+        default=None,
+        help=(
+            "Download ONLY from specific chat(s) by ID or username. "
+            "Examples: --chat @mychannel  --chat -1001234567890  --chat @group1 @group2"
+        ),
     )
     parser.add_argument(
         "--exclude-chats",
@@ -685,6 +697,26 @@ async def process_chat(
     progress.display(force=True)
 
 
+async def resolve_target_chats(
+    client: TelegramClient,
+    chat_identifiers: list[str],
+) -> list[Any]:
+    """Resolve chat IDs/usernames into dialog-like objects for direct targeting."""
+    results = []
+    for identifier in chat_identifiers:
+        try:
+            entity = await client.get_entity(identifier)
+            # Wrap in a simple namespace-like object compatible with process_chat
+            class _FakeDialog:
+                def __init__(self, entity):
+                    self.entity = entity
+            results.append(_FakeDialog(entity))
+            print(f"[Target] Resolved '{identifier}' -> {getattr(entity, 'title', identifier)}")
+        except Exception as exc:
+            print(f"[Warning] Could not resolve chat '{identifier}': {exc}")
+    return results
+
+
 async def scan_dialogs(
     client: TelegramClient,
     state: DownloadState,
@@ -693,6 +725,18 @@ async def scan_dialogs(
     semaphore: asyncio.Semaphore,
 ) -> None:
     """Iterate over all dialogs and process each eligible chat."""
+    # If --chat is specified, resolve those chats directly instead of scanning all dialogs
+    if args.chat:
+        dialogs = await resolve_target_chats(client, args.chat)
+        if not dialogs:
+            print("[Error] No target chats could be resolved. Check the chat ID/username.")
+            return
+        progress.set_total_chats(len(dialogs))
+        print(f"[Info] Targeting {len(dialogs)} specific chat(s).")
+        for dialog in dialogs:
+            await process_chat(client, dialog, state, progress, args, semaphore)
+        return
+
     dialogs: list[Any] = []
     async for dialog in client.iter_dialogs():
         dialogs.append(dialog)
@@ -714,24 +758,12 @@ async def scan_dialogs(
             continue
 
         # Skip by chat type
-        is_channel = getattr(chat, "broadcast", False) or getattr(chat, "megagroup", False)
-        is_group = getattr(chat, "megagroup", False) or (
-            getattr(chat, "gigagroup", False)
-        ) or (
-            not getattr(chat, "broadcast", False)
-            and getattr(chat, "participants_count", 0) is not None
-            and not hasattr(chat, "bot")
-        )
-        is_private = not is_channel and not is_group and getattr(chat, "participant", True)
-
-        # Simplified type detection
         chat_type = "unknown"
         if getattr(chat, "broadcast", False):
             chat_type = "channel"
         elif getattr(chat, "megagroup", False) or getattr(chat, "gigagroup", False):
             chat_type = "group"
         else:
-            # Check participant count heuristic
             participants = getattr(chat, "participants_count", None)
             if participants is not None and participants > 2:
                 chat_type = "group"
@@ -796,6 +828,7 @@ async def main() -> None:
     print(f"[Config] No private: {args.no_private}")
     print(f"[Config] No groups: {args.no_groups}")
     print(f"[Config] No channels: {args.no_channels}")
+    print(f"[Config] Target chat(s): {args.chat or 'All chats'}")
     print(f"[Config] Exclude chats: {args.exclude_chats or '—'}")
     print()
 
